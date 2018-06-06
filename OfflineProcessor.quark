@@ -1,0 +1,8 @@
+(
+	name: "OfflineProcessor",
+	summary: "Offline processor for soundfiles",
+	schelp:	"OfflineProcessor",
+	author:	"Marcin Pączkowski",
+	version: "0.0.1",
+	url:	"",
+)
