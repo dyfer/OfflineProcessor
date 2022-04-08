@@ -6,6 +6,8 @@ OfflineProcessor {
 	var <sd, <processingGraph;
 	var <rtSynth, <isPlaying = false, <isBatchProcessing = false; //RT processing
 	var <settingsPath, settingsDict;
+	var <numOutChannels; //set when building the synthdef
+	var <buffers;
 	// var <numOutChannels; //updated when building a synthdef
 	*new {
 		^super.new.init;
@@ -19,18 +21,26 @@ OfflineProcessor {
 		}, {
 				settingsDict = IdentityDictionary.new
 		});
+		buffers = List();
 		processingGraph ? {processingGraph = {}};
 	}
 
-	getNumOutChannels {arg processingGraph = {}, numInCh = 1;
-		var thisNumOutCh;
-		SynthDef(nil, { //build synth in case the synth graph contains NamedControls
-			var sigIn, sigOut;
-			sigIn = In.ar(0, numInCh);
-			sigOut = processingGraph.value(sigIn);
-			thisNumOutCh = sigOut.asArray.size;
-		});
-		^thisNumOutCh
+	addBuffer {arg newBuf;
+		try {
+			if(newBuf.bufnum.notNil) {
+				buffers.add(newBuf)
+			}
+		} {
+			"Provided object does not respond to .bufnum and will not be added".warn;
+		}
+	}
+
+	addBuffers {arg bufArr;
+		if(bufArr.isKindOf(Collection)) {
+			bufArr.do({|buf|
+				this.addBuffer(buf)
+			})
+		}
 	}
 
 	processingGraph_ {arg newGraph;
@@ -38,14 +48,14 @@ OfflineProcessor {
 			processingGraph = newGraph;
 		}, {
 			// Error(this.class ++ ": processingGraph needs to be a Function").throw;
-			(this.class.name ++ ": processingGraph needs to be a Function, not setting.").warn;
+			(this.class.name ++ ": processingGraph needs to be a Function; new graph not set.").warn;
 		});
 	}
 
-	buildSD {arg processingGraphArg, numInCh = 1, rt = false, rtFadeTime;//, silenceInputChannels = true; //if inBus is nil, synthdef will be built with PlayBuf ugen; otherwise it will use In.ar(inBus, numInCh) as input
+	buildSD {arg processingGraphArg, numInCh = 1, rt = false, rtFadeTime, silenceInputChannels = true, params; //if inBus is nil, synthdef will be built with PlayBuf ugen; otherwise it will use In.ar(inBus, numInCh) as input
 		processingGraphArg !? {processingGraph = processingGraphArg};
-		^SynthDef("Processor_" ++ this.hash, {arg buf = 0, in = 0, out = 0;
-			var sigIn, sigOut, thisNumOutCh, env;
+		^SynthDef("Processor_" ++ this.hash.abs, {arg buf = 0, in = 0, out = 0, silenceInput = 0;
+			var sigIn, sigOut, env;
 			// sig = SoundIn.ar(numInChannels.collect({|i| i}));
 			if(rt, {
 				sigIn = In.ar(in, numInCh);
@@ -53,40 +63,18 @@ OfflineProcessor {
 				sigIn = PlayBuf.ar(numInCh, buf, BufRateScale.kr(buf));
 			});
 			// sig.postln;
-			sigOut = processingGraph.value(sigIn);
+			sigOut = processingGraph.value(sigIn, params);
 			// "out: ".post; sigOut.postln;
-			if(rt, {//replace out on all input channels (and only on them)
-				// var inBusesArr, inputSilenceArr, outBusesArr;//, outBusesArr, inBusesNotInOutArr;
-				// thisNumOutCh = sigOut.asArray.size;
-				// // env = EnvGate.kr(fadeTime: rtFadeTime);
-				// inBusesArr = numInCh.collect({|inc| inc + in});
-				// outBusesArr = thisNumOutCh.collect({|inc| inc + out});
-				// inBusesArr.postln;
-				// outBusesArr.postln;
-				// inputSilenceArr = inBusesArr.collect({|item, inc| outBusesArr.includes(item).not.asInteger});
-				// inputSilenceArr.postln;
+			numOutChannels = sigOut.asArray.size;
+			if(rt, {
+				//replace output on output channels
+				//and optionally on unused inputs as well
 				env = Env.asr(1, 1, 1).kr(Done.freeSelf, \gate.kr(1), \fadeTime.kr(rtFadeTime ? 0.2));
-				// if(silenceInputChannels, {XOut.ar(in, env * inputSilenceArr, DC.ar(0) ! numInCh)}); //silence input channels - doesn't work as expected...
-
-				// inBusesArr = numInCh.collect({|inc| inc + in});
-				// outBusesArr = thisNumOutCh.collect({|inc| inc + out});
-				// inBusesNotInOutArr = inBusesArr.select({|item| outBusesArr.includes(item).not});
-				// "inBusesNotInOutArr: ".post; inBusesNotInOutArr.postln;
-				// env = EnvGate.kr(fadeTime: rtFadeTime);
-				//
-				// thisNumOutCh.do({|inc|
-				// 	if(inBusesArr.includes(outBusesArr[inc]), {
-				// 		XOut.ar(out + inc, env, sigOut[inc])
-				// 		}, {
-				// 			XOut.ar(out + inc, env, sigOut[inc])
-				// 	})
-				// });
-				//
-				// if(inBusesNotInOutArr.size > 0, {
-				// 	inBusesNotInOutArr.do({|thisOut|
-				// 		XOut.ar(out + inc, env, DC.ar(0))
-				// 	})
-				// });				*/
+				if(silenceInputChannels && (numInCh > numOutChannels), {
+					"silencing unused input channels is active".postln;
+					sigOut = sigOut.asArray ++ (DC.ar(0) ! (numInCh - numOutChannels));
+				});
+				sigOut.postln;
 				XOut.ar(out, env, sigOut)
 			}, {
 				Out.ar(0, sigOut);
@@ -95,10 +83,11 @@ OfflineProcessor {
 	}
 
 	//realtime preview
-	play { arg target = Server.default.defaultGroup, addAction = \addAfter, bus = 0, numCh = 1, processingGraphArg, allowProcessingInputChannels = false;
+	//we assume that the buffers used are already loaded on the server and we don't deal with them
+	play { arg target = Server.default.defaultGroup, addAction = \addAfter, bus = 0, numCh = 1, processingGraphArg, allowProcessingInputChannels = false, silenceInputChannels = false;
 		var server;
 		var firstInputBus, firstPrivateBus, firstProcessingBus, lastProcessingBus;
-		//if we want wiping input, let's add siping single channel synthdef and start it here as needed...
+		//if we want wiping input, let's add siping single channel synthdef and start it here as needed... for now we just add silent channels to the synthdef
 		if(isPlaying, {this.stop});
 
 		if(try{target.server}.notNil, {server = target.server}, {server = Server.default});
@@ -120,7 +109,7 @@ OfflineProcessor {
 			{
 				format("%: attempted to process signal from the audio input - aborting to prevent feedback. To override, use set allowProcessingInputChannels argument to true.", this.class.name).warn;
 			}, {
-				sd = this.buildSD(processingGraphArg, numCh, true);
+				sd = this.buildSD(processingGraphArg, numCh, true, silenceInputChannels: silenceInputChannels);
 				isPlaying = true;
 				//check for overlapping channels with input
 
@@ -128,7 +117,7 @@ OfflineProcessor {
 					sd.add;
 					server.sync;
 					if(isPlaying, { //this will prevent from starting if we call stop right after play
-						rtSynth = Synth(sd.name, [\in, bus, \out, bus], target, addAction);
+						rtSynth = Synth(sd.name, [\in, bus, \out, bus, \silenceInput, silenceInputChannels.asInteger], target, addAction);
 					});
 				}
 		});
@@ -144,16 +133,24 @@ OfflineProcessor {
 		this.stop; //anything else?
 	}
 
-	processFile {arg pathIn, pathOut, processingGraphArg, tailSize = 0, durOverride, header, format, sampleRate, action; //synth graph is being passed an input array signal and should output the array of channel; durOverride can be a function and will be passed file's duration
-		var score, options, numInChannels, numOutChannels, sd, duration, numFrames;
+	processFile {arg pathIn, pathOut, processingGraphArg, tailSize = 0, durOverride, header, format, sampleRate, action, preprocessingFunc; //synth graph is being passed an input array signal and should output the array of channel; durOverride can be a function and will be passed file's duration
+		var score, events, options, numInChannels, sd, duration, numFrames;
 		var scoreBuffer, server, oscFilePath;
+		var maxSynthDefSize = 65516, sdExceedsSize, sdPath;
+		var bufnum, usedBufnums;
+		var params;
 		"pathIn: ".post; pathIn.postln;
 		// buffer = CtkBuffer.playbuf(pathIn);
 		// buffer = SoundFile(pathIn);
 		options = ServerOptions.new;
 		server = Server.new;
 
-		processingGraphArg !? {processingGraph = processingGraphArg};
+		// "processingGraphArg: ".post; processingGraphArg.def.sourceCode.postln;
+
+		processingGraphArg !? {this.processingGraph = processingGraphArg};
+
+		// "this.processingGraph: ".post; this.processingGraph.def.sourceCode.postln;
+		// "processingGraph: ".post; processingGraph.def.sourceCode.postln;
 
 		SoundFile.use(pathIn, {|file|
 			numInChannels = file.numChannels;
@@ -172,27 +169,79 @@ OfflineProcessor {
 			header = header ? file.headerFormat;
 		});
 
-		sd= this.buildSD(processingGraph, numInChannels);
-		numOutChannels = this.getNumOutChannels(processingGraph, numInChannels);
+
+		score = Score();//(events.asArray);
+
+		preprocessingFunc !? {
+			params = preprocessingFunc.(score, options.sampleRate, duration)
+		};
+
+		sd = this.buildSD(processingGraph, numInChannels, params: params);
+		// numOutChannels = this.getNumOutChannels(processingGraph, numInChannels);
 
 		"numOutChannels: ".post; numOutChannels.postln;
 		options.numInputBusChannels = numInChannels;
 		options.numOutputBusChannels = numOutChannels;
+		options.memSize_(2.pow(16));
 
-		scoreBuffer = Buffer.new(server, numFrames, numInChannels);
+		if(buffers.size > 0) {
+			bufnum = 0;
+			usedBufnums = buffers.collect({|buf| buf.bufnum});
+			"usedBufnums: ".post; usedBufnums.postln;
+			while({
+				usedBufnums.includes(bufnum);
+			}, {
+				bufnum = server.nextBufferNumber(1);
+				"trying more bufnums".postln;
+			});
+		} {
+			bufnum = server.nextBufferNumber(1);
+		};
+		"bufnum: ".post; bufnum.postln;
 
-		score = Score([
-			[0, scoreBuffer.allocReadMsg(pathIn).postln],
-			[0, [\d_recv, sd.asBytes]],
-			// [0, [\s_new, sd.name, 1000, 0, 0, \buf, scoreBuffer.bufnum]],
-			[0, Synth.basicNew(sd.name, server).newMsg(nil, [\buf, scoreBuffer.bufnum])],
-			[duration, [\c_set, 0, 0]]
-		]);
+		scoreBuffer = Buffer.new(server, numFrames, numInChannels, bufnum);
+
+		if(sd.asBytes.size > maxSynthDefSize, {
+			sdExceedsSize = true;
+			"synthdef too big, writing synthdef file".postln;
+			sd.writeDefFile;
+			sdPath = SynthDef.synthDefDir +/+ sd.name ++ ".scsyndef";
+		}, {
+			sdExceedsSize = false;
+		});
+
+		events = List();
+		events.add([0, scoreBuffer.allocReadMsg(pathIn).postln]);
+		if(buffers.size > 0) {
+			buffers.do({|buf|
+				if(buf.path.notNil) {
+					"adding buffer at ".post; buf.path.postln;
+					events.add([0, buf.allocReadMsg(buf.path)]);
+				} {
+					"adding empty buffer, numFrames ".post; buf.numFrames.postln;
+					events.add([0, buf.allocMsg]);
+				}
+			});
+		};
+		if(sdExceedsSize.not, {events.add([0, [\d_recv, sd.asBytes]])});
+		// [0, [\s_new, sd.name, 1000, 0, 0, \buf, scoreBuffer.bufnum]],
+		events.add([0, Synth.basicNew(sd.name, server).newMsg(nil, [\buf, scoreBuffer.bufnum])]);
+		events.add([duration, [\c_set, 0, 0]]);
+
+		events.asArray.do({|ev|
+			score.add(ev)
+		});
 
 		oscFilePath = PathName.tmp ++ sd.name ++ ".osc";
+		"writing the score".postln;
 		// score.play;
 		// score.write(pathOut, duration, options.sampleRate, header, format, options, action);
-		score.recordNRT(oscFilePath, pathOut, nil, options.sampleRate, header, format, options, "", duration, {File.delete(oscFilePath); "action fired".postln; action.()});
+		score.recordNRT(oscFilePath, pathOut, nil, options.sampleRate, header, format, options, "", duration, {
+			File.delete(oscFilePath);
+			if(sdExceedsSize, {"removing synthdef file at ".post; sdPath.postln; File.delete(sdPath)});
+			action.();
+			"process completed".postln;
+		});
 
 	}
 
