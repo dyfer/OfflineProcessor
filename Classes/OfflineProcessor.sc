@@ -52,15 +52,19 @@ OfflineProcessor {
 		});
 	}
 
-	buildSD {arg processingGraphArg, numInCh = 1, rt = false, rtFadeTime, silenceInputChannels = true, params; //if inBus is nil, synthdef will be built with PlayBuf ugen; otherwise it will use In.ar(inBus, numInCh) as input
+	// useSoundInForNRT can be used for files >4GB (if the format supports it); in that case sample rate conversion is not available
+	buildSD {arg processingGraphArg, numInCh = 1, rt = false, rtFadeTime, silenceInputChannels = true, params, useSoundInForNRT = false; //if inBus is nil, synthdef will be built with PlayBuf ugen; otherwise it will use In.ar(inBus, numInCh) as input
 		processingGraphArg !? {processingGraph = processingGraphArg};
 		^SynthDef("Processor_" ++ this.hash.abs, {arg buf = 0, in = 0, out = 0, silenceInput = 0;
 			var sigIn, sigOut, env;
-			// sig = SoundIn.ar(numInChannels.collect({|i| i}));
 			if(rt, {
 				sigIn = In.ar(in, numInCh);
 			}, {
-				sigIn = PlayBuf.ar(numInCh, buf, BufRateScale.kr(buf));
+				if(useSoundInForNRT, {
+					sigIn = SoundIn.ar((0..(numInCh - 1)));
+				}, {
+					sigIn = PlayBuf.ar(numInCh, buf, BufRateScale.kr(buf));
+				});
 			});
 			// sig.postln;
 			sigOut = processingGraph.value(sigIn, params);
@@ -133,7 +137,7 @@ OfflineProcessor {
 		this.stop; //anything else?
 	}
 
-	processFile {arg pathIn, pathOut, processingGraphArg, tailSize = 0, durOverride, header, format, sampleRate, action, preprocessingFunc; //synth graph is being passed an input array signal and should output the array of channel; durOverride can be a function and will be passed file's duration
+	processFile {arg pathIn, pathOut, processingGraphArg, tailSize = 0, durOverride, header, format, sampleRate, action, preprocessingFunc, useSoundInForNRT = false; //synth graph is being passed an input array signal and should output the array of channel; durOverride can be a function and will be passed file's duration
 		var score, events, options, numInChannels, sd, duration, numFrames;
 		var scoreBuffer, server, oscFilePath;
 		var maxSynthDefSize = 65516, sdExceedsSize, sdPath;
@@ -162,6 +166,11 @@ OfflineProcessor {
 			"used duration + tailSize: ".post; duration.postln;
 			"processingGraph: ".post; processingGraph.def.sourceCode.postln;
 			options.sampleRate = sampleRate ? file.sampleRate;// / 4;
+			if(useSoundInForNRT, {
+				if(options.sampleRate.asInteger != file.sampleRate.asInteger, {
+					Error("Can't convert sample rate when useSoundInForNRT is true").throw
+				})
+			});
 			numFrames = file.numFrames;
 			"file's sampleRate: ".post; file.sampleRate.postln;
 			"processing sampleRate: ".post; options.sampleRate.postln;
@@ -176,7 +185,7 @@ OfflineProcessor {
 			params = preprocessingFunc.(score, options.sampleRate, duration)
 		};
 
-		sd = this.buildSD(processingGraph, numInChannels, params: params);
+		sd = this.buildSD(processingGraph, numInChannels, params: params, useSoundInForNRT: useSoundInForNRT);
 		// numOutChannels = this.getNumOutChannels(processingGraph, numInChannels);
 
 		"numOutChannels: ".post; numOutChannels.postln;
@@ -211,7 +220,9 @@ OfflineProcessor {
 		});
 
 		events = List();
-		events.add([0, scoreBuffer.allocReadMsg(pathIn).postln]);
+		if(useSoundInForNRT.not, {
+			events.add([0, scoreBuffer.allocReadMsg(pathIn).postln]);
+		});
 		if(buffers.size > 0) {
 			buffers.do({|buf|
 				if(buf.path.notNil) {
@@ -236,7 +247,7 @@ OfflineProcessor {
 		"writing the score".postln;
 		// score.play;
 		// score.write(pathOut, duration, options.sampleRate, header, format, options, action);
-		score.recordNRT(oscFilePath, pathOut, nil, options.sampleRate, header, format, options, "", duration, {
+		score.recordNRT(oscFilePath, pathOut, useSoundInForNRT.if({pathIn},{nil}), options.sampleRate, header, format, options, "", duration, {
 			File.delete(oscFilePath);
 			if(sdExceedsSize, {"removing synthdef file at ".post; sdPath.postln; File.delete(sdPath)});
 			action.();
@@ -253,7 +264,7 @@ OfflineProcessor {
 	// %e - input file extension (without full stop)
 	// %h - header
 	// %i - index into the array of input files' paths
-	processAllInDirectory {arg pathInPattern, pathOutPattern, processingGraphArg, tailSize = 0, durOverride, header, format, sampleRate, action;
+	processAllInDirectory {arg pathInPattern, pathOutPattern, processingGraphArg, tailSize = 0, durOverride, header, format, sampleRate, action, useSoundInForNRT = false;
 		var cond, allInputPaths;
 		cond = Condition.new(false);
 		isBatchProcessing = true;
@@ -284,7 +295,7 @@ OfflineProcessor {
 						"file doesn't exist".postln;
 						"processing file ".post; thisInPath.postln;
 						"saving as ".post; thisOutPath.postln;
-						this.processFile(thisInPath, thisOutPath, processingGraphArg, tailSize, durOverride, header, format, sampleRate, {"also here fired".postln; cond.test = true; cond.signal});
+						this.processFile(thisInPath, thisOutPath, processingGraphArg, tailSize, durOverride, header, format, sampleRate, {"also here fired".postln; cond.test = true; cond.signal}, useSoundInForNRT: useSoundInForNRT);
 						cond.test = false;
 						"before yield".postln;
 						cond.wait;
