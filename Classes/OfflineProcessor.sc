@@ -192,6 +192,7 @@ OfflineProcessor {
 		options.numInputBusChannels = numInChannels;
 		options.numOutputBusChannels = numOutChannels;
 		options.memSize_(2.pow(16));
+		options.numWireBufs_(512);
 
 		if(buffers.size > 0) {
 			bufnum = 0;
