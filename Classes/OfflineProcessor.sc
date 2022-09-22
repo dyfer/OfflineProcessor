@@ -172,6 +172,10 @@ OfflineProcessor {
 			"processing sampleRate: ".post; options.sampleRate.postln;
 			format = format ? file.sampleFormat;
 			header = header ? file.headerFormat;
+			if(header.replace(" ", "").isEmpty) {
+				header = PathName(pathIn).extension;
+				"header format not recognized, resetting to \"%\"".format(header).warn;
+			};
 			"format %, header %".format(format, header).postln;
 		});
 
