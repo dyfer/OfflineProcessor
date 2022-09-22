@@ -180,7 +180,7 @@ OfflineProcessor {
 		});
 
 
-		score = Score();//(events.asArray);
+		// score = Score();//(events.asArray);
 
 		preprocessingFunc !? {
 			params = preprocessingFunc.(score, options.sampleRate, duration)
@@ -241,22 +241,22 @@ OfflineProcessor {
 		events.add([0, Synth.basicNew(sd.name, server).newMsg(nil, [\buf, scoreBuffer.bufnum])]);
 		events.add([duration, [\c_set, 0, 0]]);
 
-		events.asArray.do({|ev|
-			score.add(ev)
-		});
+		// events.asArray.do({|ev|
+		// 	score.add(ev)
+		// });
 
 		oscFilePath = PathName.tmp ++ sd.name ++ ".osc";
 		"writing the score".postln;
 		"duration: ".post; duration.postln;
 		// score.play;
 		// score.write(pathOut, duration, options.sampleRate, header, format, options, action);
-		score.recordNRT(oscFilePath, pathOut, useSoundInForNRT.if({pathIn},{nil}), options.sampleRate, header, format, options, "", duration, {
-			File.delete(oscFilePath);
+		Score.recordNRT(events, oscFilePath, pathOut, useSoundInForNRT.if({pathIn},{nil}), options.sampleRate, header, format, options, "", duration, {
+			// File.delete(oscFilePath);
 			if(sdExceedsSize, {"removing synthdef file at ".post; sdPath.postln; File.delete(sdPath)});
 			action.();
 			"process completed".postln;
 		});
-
+		// ^events;
 	}
 
 	//pathInPattern uses pathMatch
