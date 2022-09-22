@@ -102,14 +102,10 @@ OfflineProcessor {
 		lastProcessingBus = bus + numCh - 1;
 		if(
 			(
-				(
-					(lastProcessingBus >= firstInputBus) && (lastProcessingBus < firstPrivateBus)
-				)
-				|| (
-					(firstProcessingBus >= firstInputBus) && (firstProcessingBus < firstPrivateBus)
-				)
+				((lastProcessingBus >= firstInputBus) && (lastProcessingBus < firstPrivateBus))
+				or: {(firstProcessingBus >= firstInputBus) && (firstProcessingBus < firstPrivateBus)}
 			)
-			&& allowProcessingInputChannels.not,
+			and: {allowProcessingInputChannels.not},
 			{
 				format("%: attempted to process signal from the audio input - aborting to prevent feedback. To override, use set allowProcessingInputChannels argument to true.", this.class.name).warn;
 			}, {
