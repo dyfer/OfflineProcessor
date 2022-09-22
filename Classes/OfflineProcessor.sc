@@ -63,7 +63,7 @@ OfflineProcessor {
 				if(useSoundInForNRT, {
 					sigIn = SoundIn.ar((0..(numInCh - 1)));
 				}, {
-					sigIn = PlayBuf.ar(numInCh, buf, BufRateScale.kr(buf));
+					sigIn = VDiskIn.ar(numInCh, buf, BufRateScale.kr(buf));
 				});
 			});
 			// sig.postln;
@@ -210,7 +210,8 @@ OfflineProcessor {
 		};
 		"bufnum: ".post; bufnum.postln;
 
-		scoreBuffer = Buffer.new(server, numFrames, numInChannels, bufnum);
+		// scoreBuffer = Buffer.new(server, numFrames, numInChannels, bufnum); // this was for PlayBuf
+		scoreBuffer = Buffer.new(server, 2.pow(16), numInChannels, bufnum); // buffer size for use with VDiskIn
 
 		if(sd.asBytes.size > maxSynthDefSize, {
 			sdExceedsSize = true;
@@ -223,7 +224,8 @@ OfflineProcessor {
 
 		events = List();
 		if(useSoundInForNRT.not, {
-			events.add([0, scoreBuffer.allocReadMsg(pathIn).postln]);
+			events.add([0, scoreBuffer.allocMsg().postln, scoreBuffer.cueSoundFileMsg(pathIn).postln]);
+			// events.add([0, ]);
 		});
 		if(buffers.size > 0) {
 			buffers.do({|buf|
