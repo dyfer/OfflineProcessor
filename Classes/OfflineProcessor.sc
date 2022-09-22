@@ -176,6 +176,7 @@ OfflineProcessor {
 			"processing sampleRate: ".post; options.sampleRate.postln;
 			format = format ? file.sampleFormat;
 			header = header ? file.headerFormat;
+			"format %, header %".format(format, header).postln;
 		});
 
 
@@ -246,6 +247,7 @@ OfflineProcessor {
 
 		oscFilePath = PathName.tmp ++ sd.name ++ ".osc";
 		"writing the score".postln;
+		"duration: ".post; duration.postln;
 		// score.play;
 		// score.write(pathOut, duration, options.sampleRate, header, format, options, action);
 		score.recordNRT(oscFilePath, pathOut, useSoundInForNRT.if({pathIn},{nil}), options.sampleRate, header, format, options, "", duration, {
